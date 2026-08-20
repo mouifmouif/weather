@@ -1,0 +1,6 @@
+# Ignore .env file
+.env
+
+# Ignore other sensitive files (e.g., IDE settings, logs)
+*.log
+.vscode/
