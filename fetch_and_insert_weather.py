@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Fetch daily max/min temperatures from Open-Meteo archive and insert into Postgres.
+Fetch daily weather data from Open-Meteo archive and insert into Postgres.
 
 Usage:
   - Set DB via DATABASE_URL (preferred) or PGHOST/PGPORT/PGUSER/PGPASSWORD/PGDATABASE.
@@ -25,7 +25,15 @@ DATABASE_URL = os.getenv("DATABASE_URL")  # e.g. "postgres://user:pass@host:port
 START_DATE = os.getenv("START_DATE", "2026-08-01")
 END_DATE = os.getenv("END_DATE", "2026-08-10")
 OPENMETEO_URL = "https://archive-api.open-meteo.com/v1/archive"
-DAILY_VARS = ["temperature_2m_max", "temperature_2m_min"]
+DAILY_VARS = [
+    "temperature_2m_max",
+    "temperature_2m_min",
+    "apparent_temperature_max",
+    "apparent_temperature_min",
+    "sunshine_duration",
+    "rain_sum",
+    "snowfall_sum"
+]
 
 # Logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -59,6 +67,11 @@ def ensure_table(conn):
         date DATE NOT NULL,
         temp_max NUMERIC,
         temp_min NUMERIC,
+        apparent_temp_max NUMERIC,
+        apparent_temp_min NUMERIC,
+        sunshine_duration NUMERIC,
+        rain_sum NUMERIC,
+        snowfall_sum NUMERIC,
         retrieved_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
         UNIQUE (city_id, date)
     );
@@ -85,15 +98,21 @@ def fetch_for_city(client, lat, lon, start_date, end_date):
     return data
 
 def parse_daily_entries(data):
-    # returns list of dicts: {"date": date_str, "temperature_2m_max": val, "temperature_2m_min": val}
+    # returns list of dicts with all daily weather variables
     log.debug("Raw API response: %s", json.dumps(data, indent=2, default=str))
     
     daily = data.get("daily", {}) if isinstance(data, dict) else {}
     times = daily.get("time", [])
     tmax = daily.get("temperature_2m_max", [])
     tmin = daily.get("temperature_2m_min", [])
+    apparent_tmax = daily.get("apparent_temperature_max", [])
+    apparent_tmin = daily.get("apparent_temperature_min", [])
+    sunshine = daily.get("sunshine_duration", [])
+    rain = daily.get("rain_sum", [])
+    snowfall = daily.get("snowfall_sum", [])
     
-    log.info("Parsed - times: %s, tmax: %s, tmin: %s", times, tmax, tmin)
+    log.info("Parsed - times: %s, tmax: %s, tmin: %s, apparent_tmax: %s, apparent_tmin: %s, sunshine: %s, rain: %s, snowfall: %s",
+             times, tmax, tmin, apparent_tmax, apparent_tmin, sunshine, rain, snowfall)
     
     rows = []
     for i, d in enumerate(times):
@@ -101,6 +120,11 @@ def parse_daily_entries(data):
             "date": d,
             "temperature_2m_max": tmax[i] if i < len(tmax) else None,
             "temperature_2m_min": tmin[i] if i < len(tmin) else None,
+            "apparent_temperature_max": apparent_tmax[i] if i < len(apparent_tmax) else None,
+            "apparent_temperature_min": apparent_tmin[i] if i < len(apparent_tmin) else None,
+            "sunshine_duration": sunshine[i] if i < len(sunshine) else None,
+            "rain_sum": rain[i] if i < len(rain) else None,
+            "snowfall_sum": snowfall[i] if i < len(snowfall) else None,
         }
         rows.append(row)
     return rows
@@ -109,16 +133,31 @@ def upsert_daily_weather(conn, city_id, parsed_rows):
     if not parsed_rows:
         return 0
     sql = """
-    INSERT INTO daily_weather (city_id, date, temp_max, temp_min, retrieved_at)
-    VALUES (%s, %s, %s, %s, now())
+    INSERT INTO daily_weather (city_id, date, temp_max, temp_min, apparent_temp_max, apparent_temp_min, sunshine_duration, rain_sum, snowfall_sum, retrieved_at)
+    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, now())
     ON CONFLICT (city_id, date) DO UPDATE
       SET temp_max = EXCLUDED.temp_max,
           temp_min = EXCLUDED.temp_min,
+          apparent_temp_max = EXCLUDED.apparent_temp_max,
+          apparent_temp_min = EXCLUDED.apparent_temp_min,
+          sunshine_duration = EXCLUDED.sunshine_duration,
+          rain_sum = EXCLUDED.rain_sum,
+          snowfall_sum = EXCLUDED.snowfall_sum,
           retrieved_at = EXCLUDED.retrieved_at;
     """
     params = []
     for r in parsed_rows:
-        params.append((city_id, r["date"], r["temperature_2m_max"], r["temperature_2m_min"]))
+        params.append((
+            city_id,
+            r["date"],
+            r["temperature_2m_max"],
+            r["temperature_2m_min"],
+            r["apparent_temperature_max"],
+            r["apparent_temperature_min"],
+            r["sunshine_duration"],
+            r["rain_sum"],
+            r["snowfall_sum"]
+        ))
     with conn.cursor() as cur:
         psycopg2.extras.execute_batch(cur, sql, params, page_size=100)
     conn.commit()
