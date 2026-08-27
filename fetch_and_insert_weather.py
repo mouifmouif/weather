@@ -18,6 +18,7 @@ from dotenv import load_dotenv
 import requests_cache
 from retry_requests import retry
 import openmeteo_requests
+import json
 
 # Config
 DATABASE_URL = os.getenv("DATABASE_URL")  # e.g. "postgres://user:pass@host:port/dbname"
@@ -85,10 +86,15 @@ def fetch_for_city(client, lat, lon, start_date, end_date):
 
 def parse_daily_entries(data):
     # returns list of dicts: {"date": date_str, "temperature_2m_max": val, "temperature_2m_min": val}
+    log.debug("Raw API response: %s", json.dumps(data, indent=2, default=str))
+    
     daily = data.get("daily", {}) if isinstance(data, dict) else {}
     times = daily.get("time", [])
     tmax = daily.get("temperature_2m_max", [])
     tmin = daily.get("temperature_2m_min", [])
+    
+    log.info("Parsed - times: %s, tmax: %s, tmin: %s", times, tmax, tmin)
+    
     rows = []
     for i, d in enumerate(times):
         row = {
