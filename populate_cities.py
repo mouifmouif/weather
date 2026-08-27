@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+
+
 """
 Populate the `cities` table with a small set of cities.
 
@@ -19,6 +21,8 @@ import os
 import logging
 import psycopg2
 import psycopg2.extras
+from dotenv import load_dotenv
+
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
@@ -32,6 +36,9 @@ CITIES = [
 
 
 def get_db_conn():
+    # Load environment variables from .env
+    load_dotenv()
+  
     database_url = os.getenv("DATABASE_URL")
     if database_url:
         return psycopg2.connect(database_url)
