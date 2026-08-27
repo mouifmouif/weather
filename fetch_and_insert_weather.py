@@ -61,24 +61,17 @@ def build_openmeteo_client():
     return openmeteo_requests.Client(session=retry_session)
 
 def ensure_table(conn):
-    create_sql = """
-    CREATE TABLE IF NOT EXISTS daily_weather (
-        id SERIAL PRIMARY KEY,
-        city_id INTEGER REFERENCES cities(id),
-        date DATE NOT NULL,
-        temp_max NUMERIC,
-        temp_min NUMERIC,
-        apparent_temp_max NUMERIC,
-        apparent_temp_min NUMERIC,
-        sunshine_duration NUMERIC,
-        rain_sum NUMERIC,
-        snowfall_sum NUMERIC,
-        retrieved_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
-        UNIQUE (city_id, date)
-    );
-    """
+    """Verify table exists (no creation needed, table already exists)."""
     with conn.cursor() as cur:
-        cur.execute(create_sql)
+        cur.execute("""
+            SELECT EXISTS(
+                SELECT 1 FROM information_schema.tables 
+                WHERE table_name = 'daily_weather'
+            );
+        """)
+        exists = cur.fetchone()[0]
+        if not exists:
+            raise RuntimeError("daily_weather table does not exist. Please create it first.")
     conn.commit()
 
 def fetch_for_city(client, lat, lon, start_date, end_date):
@@ -130,12 +123,12 @@ def parse_daily_entries(response):
     rows = []
     for i, date in enumerate(dates):
         row = {
-            "date": date.strftime("%Y-%m-%d"),
-            "temperature_2m_max": float(daily_temperature_2m_max[i]) if i < len(daily_temperature_2m_max) else None,
-            "temperature_2m_min": float(daily_temperature_2m_min[i]) if i < len(daily_temperature_2m_min) else None,
+            "day": date.strftime("%Y-%m-%d"),
+            "daily_max": float(daily_temperature_2m_max[i]) if i < len(daily_temperature_2m_max) else None,
+            "daily_min": float(daily_temperature_2m_min[i]) if i < len(daily_temperature_2m_min) else None,
             "apparent_temperature_max": float(daily_apparent_temperature_max[i]) if i < len(daily_apparent_temperature_max) else None,
             "apparent_temperature_min": float(daily_apparent_temperature_min[i]) if i < len(daily_apparent_temperature_min) else None,
-            "sunshine_duration": float(daily_sunshine_duration[i]) if i < len(daily_sunshine_duration) else None,
+            "sunshine_duration_minutes": float(daily_sunshine_duration[i]) / 60 if i < len(daily_sunshine_duration) else None,
             "rain_sum": float(daily_rain_sum[i]) if i < len(daily_rain_sum) else None,
             "snowfall_sum": float(daily_snowfall_sum[i]) if i < len(daily_snowfall_sum) else None,
         }
@@ -146,35 +139,39 @@ def upsert_daily_weather(conn, city_id, parsed_rows):
     if not parsed_rows:
         return 0
     sql = """
-    INSERT INTO daily_weather (city_id, date, temp_max, temp_min, apparent_temp_max, apparent_temp_min, sunshine_duration, rain_sum, snowfall_sum, retrieved_at)
-    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, now())
-    ON CONFLICT (city_id, date) DO UPDATE
-      SET temp_max = EXCLUDED.temp_max,
-          temp_min = EXCLUDED.temp_min,
-          apparent_temp_max = EXCLUDED.apparent_temp_max,
-          apparent_temp_min = EXCLUDED.apparent_temp_min,
-          sunshine_duration = EXCLUDED.sunshine_duration,
+    INSERT INTO daily_weather (city_id, day, daily_max, daily_min, apparent_temperature_max, apparent_temperature_min, sunshine_duration_minutes, rain_sum, snowfall_sum)
+    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+    ON CONFLICT (city_id, day) DO UPDATE
+      SET daily_max = EXCLUDED.daily_max,
+          daily_min = EXCLUDED.daily_min,
+          apparent_temperature_max = EXCLUDED.apparent_temperature_max,
+          apparent_temperature_min = EXCLUDED.apparent_temperature_min,
+          sunshine_duration_minutes = EXCLUDED.sunshine_duration_minutes,
           rain_sum = EXCLUDED.rain_sum,
           snowfall_sum = EXCLUDED.snowfall_sum,
-          retrieved_at = EXCLUDED.retrieved_at;
+          updated_at = now();
     """
     params = []
     for r in parsed_rows:
         params.append((
             city_id,
-            r["date"],
-            r["temperature_2m_max"],
-            r["temperature_2m_min"],
+            r["day"],
+            r["daily_max"],
+            r["daily_min"],
             r["apparent_temperature_max"],
             r["apparent_temperature_min"],
-            r["sunshine_duration"],
+            r["sunshine_duration_minutes"],
             r["rain_sum"],
             r["snowfall_sum"]
         ))
-    with conn.cursor() as cur:
-        psycopg2.extras.execute_batch(cur, sql, params, page_size=100)
-    conn.commit()
-    return len(params)
+    try:
+        with conn.cursor() as cur:
+            psycopg2.extras.execute_batch(cur, sql, params, page_size=100)
+        conn.commit()
+        return len(params)
+    except Exception as e:
+        conn.rollback()
+        raise
 
 def main():
     client = build_openmeteo_client()
