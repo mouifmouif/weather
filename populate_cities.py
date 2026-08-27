@@ -37,6 +37,7 @@ CITIES = [
     {"city": "Toulouse", "country": "France"},
     {"city": "Paris", "country": "France"},
     {"city": "London", "country": "UK"},
+    {"city": "Poznan", "country": "Poland"},  
 ]
 
 
