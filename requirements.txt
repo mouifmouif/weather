@@ -1,3 +1,4 @@
 python-dotenv
 psycopg2-binary
 geopy>=2.3.0
+requests_cache
