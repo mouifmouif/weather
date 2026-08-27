@@ -44,7 +44,6 @@ def get_db_conn():
         password=os.getenv("PGPASSWORD", ""),
         dbname=os.getenv("PGDATABASE", "weather_data"),
     )
-    return conn
 
 def build_openmeteo_client():
     cache_session = requests_cache.CachedSession(".cache", expire_after=-1)
