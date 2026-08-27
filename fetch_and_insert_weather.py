@@ -19,6 +19,7 @@ import requests_cache
 from retry_requests import retry
 import openmeteo_requests
 import json
+import pandas as pd
 
 # Config
 DATABASE_URL = os.getenv("DATABASE_URL")  # e.g. "postgres://user:pass@host:port/dbname"
@@ -89,42 +90,54 @@ def fetch_for_city(client, lat, lon, start_date, end_date):
         "daily": DAILY_VARS,
         # optional: timezone="UTC"
     }
-    # The client may return a requests.Response-like object or a dict.
-    resp = client.weather_api(OPENMETEO_URL, params=params)
-    if hasattr(resp, "json"):
-        data = resp.json()
-    else:
-        data = resp
-    return data
+    # openmeteo_requests.Client returns a list of response objects
+    responses = client.weather_api(OPENMETEO_URL, params=params)
+    return responses[0] if responses else None
 
-def parse_daily_entries(data):
-    # returns list of dicts with all daily weather variables
-    log.debug("Raw API response: %s", json.dumps(data, indent=2, default=str))
+def parse_daily_entries(response):
+    """
+    Parse Open-Meteo response object (not JSON dict).
+    Returns list of dicts with all daily weather variables.
+    """
+    if response is None:
+        return []
     
-    daily = data.get("daily", {}) if isinstance(data, dict) else {}
-    times = daily.get("time", [])
-    tmax = daily.get("temperature_2m_max", [])
-    tmin = daily.get("temperature_2m_min", [])
-    apparent_tmax = daily.get("apparent_temperature_max", [])
-    apparent_tmin = daily.get("apparent_temperature_min", [])
-    sunshine = daily.get("sunshine_duration", [])
-    rain = daily.get("rain_sum", [])
-    snowfall = daily.get("snowfall_sum", [])
+    # Get daily data from response object
+    daily = response.Daily()
     
-    log.info("Parsed - times: %s, tmax: %s, tmin: %s, apparent_tmax: %s, apparent_tmin: %s, sunshine: %s, rain: %s, snowfall: %s",
-             times, tmax, tmin, apparent_tmax, apparent_tmin, sunshine, rain, snowfall)
+    # Extract time series (Variables are indexed in order: 0-6 match DAILY_VARS order)
+    daily_temperature_2m_max = daily.Variables(0).ValuesAsNumpy()
+    daily_temperature_2m_min = daily.Variables(1).ValuesAsNumpy()
+    daily_apparent_temperature_max = daily.Variables(2).ValuesAsNumpy()
+    daily_apparent_temperature_min = daily.Variables(3).ValuesAsNumpy()
+    daily_sunshine_duration = daily.Variables(4).ValuesAsNumpy()
+    daily_rain_sum = daily.Variables(5).ValuesAsNumpy()
+    daily_snowfall_sum = daily.Variables(6).ValuesAsNumpy()
+    
+    # Build date range
+    dates = pd.date_range(
+        start=pd.to_datetime(daily.Time(), unit="s", utc=True),
+        end=pd.to_datetime(daily.TimeEnd(), unit="s", utc=True),
+        freq=pd.Timedelta(seconds=daily.Interval()),
+        inclusive="left"
+    )
+    
+    log.info("Parsed - times: %d entries, tmax: %d, tmin: %d, apparent_tmax: %d, apparent_tmin: %d, sunshine: %d, rain: %d, snowfall: %d",
+             len(dates), len(daily_temperature_2m_max), len(daily_temperature_2m_min), 
+             len(daily_apparent_temperature_max), len(daily_apparent_temperature_min),
+             len(daily_sunshine_duration), len(daily_rain_sum), len(daily_snowfall_sum))
     
     rows = []
-    for i, d in enumerate(times):
+    for i, date in enumerate(dates):
         row = {
-            "date": d,
-            "temperature_2m_max": tmax[i] if i < len(tmax) else None,
-            "temperature_2m_min": tmin[i] if i < len(tmin) else None,
-            "apparent_temperature_max": apparent_tmax[i] if i < len(apparent_tmax) else None,
-            "apparent_temperature_min": apparent_tmin[i] if i < len(apparent_tmin) else None,
-            "sunshine_duration": sunshine[i] if i < len(sunshine) else None,
-            "rain_sum": rain[i] if i < len(rain) else None,
-            "snowfall_sum": snowfall[i] if i < len(snowfall) else None,
+            "date": date.strftime("%Y-%m-%d"),
+            "temperature_2m_max": float(daily_temperature_2m_max[i]) if i < len(daily_temperature_2m_max) else None,
+            "temperature_2m_min": float(daily_temperature_2m_min[i]) if i < len(daily_temperature_2m_min) else None,
+            "apparent_temperature_max": float(daily_apparent_temperature_max[i]) if i < len(daily_apparent_temperature_max) else None,
+            "apparent_temperature_min": float(daily_apparent_temperature_min[i]) if i < len(daily_apparent_temperature_min) else None,
+            "sunshine_duration": float(daily_sunshine_duration[i]) if i < len(daily_sunshine_duration) else None,
+            "rain_sum": float(daily_rain_sum[i]) if i < len(daily_rain_sum) else None,
+            "snowfall_sum": float(daily_snowfall_sum[i]) if i < len(daily_snowfall_sum) else None,
         }
         rows.append(row)
     return rows
@@ -183,8 +196,8 @@ def main():
             lon = c["longitude"]
             log.info("Fetching %s (id=%s) lat=%s lon=%s", name, city_id, lat, lon)
             try:
-                data = fetch_for_city(client, lat, lon, START_DATE, END_DATE)
-                parsed = parse_daily_entries(data)
+                response = fetch_for_city(client, lat, lon, START_DATE, END_DATE)
+                parsed = parse_daily_entries(response)
                 n = upsert_daily_weather(conn, city_id, parsed)
                 log.info("Inserted/updated %d rows for city %s", n, name)
                 total += n
