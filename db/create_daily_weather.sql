@@ -1,4 +1,5 @@
--- Create a new table to store extended daily weather data
+-- Create the database
+CREATE DATABASE weather_data;
 -- Run this inside psql after connecting to your database (e.g. \c weather_data)
 
 -- Table: daily_weather
