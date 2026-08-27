@@ -4,3 +4,4 @@ geopy>=2.3.0
 requests_cache
 retry_requests
 openmeteo_requests
+pandas
