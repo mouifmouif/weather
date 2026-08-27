@@ -14,6 +14,7 @@ import logging
 from datetime import datetime
 import psycopg2
 import psycopg2.extras
+from dotenv import load_dotenv
 import requests_cache
 from retry_requests import retry
 import openmeteo_requests
@@ -30,10 +31,13 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 log = logging.getLogger(__name__)
 
 def get_db_conn():
-    if DATABASE_URL:
-        return psycopg2.connect(DATABASE_URL)
-    # fallback to components
-    conn = psycopg2.connect(
+    # Load environment variables from .env
+    load_dotenv()
+  
+    database_url = os.getenv("DATABASE_URL")
+    if database_url:
+        return psycopg2.connect(database_url)
+    return psycopg2.connect(
         host=os.getenv("PGHOST", "localhost"),
         port=os.getenv("PGPORT", "5432"),
         user=os.getenv("PGUSER", "postgres"),
