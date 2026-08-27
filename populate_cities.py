@@ -8,7 +8,10 @@ Usage:
   - Set DB via DATABASE_URL (preferred) or PGHOST/PGPORT/PGUSER/PGPASSWORD/PGDATABASE.
   - Run: python populate_cities.py
 
-This script inserts the following cities if they do not already exist (by name):
+This script automatically retrieves latitude/longitude for each city using
+Nominatim (OpenStreetMap geocoding).
+
+Cities to populate:
   - Tallinn, Estonia
   - Toulouse, France
   - Paris, France
@@ -22,16 +25,18 @@ import logging
 import psycopg2
 import psycopg2.extras
 from dotenv import load_dotenv
+from geopy.geocoders import Nominatim
+from geopy.exc import GeocoderTimedOut, GeocoderServiceError
 
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
 
 CITIES = [
-    {"name": "Tallinn, Estonia", "latitude": 59.437000, "longitude": 24.753600},
-    {"name": "Toulouse, France", "latitude": 43.604500, "longitude": 1.444000},
-    {"name": "Paris, France", "latitude": 48.856600, "longitude": 2.352200},
-    {"name": "London, UK", "latitude": 51.507400, "longitude": -0.127800},
+    {"city": "Tallinn", "country": "Estonia"},
+    {"city": "Toulouse", "country": "France"},
+    {"city": "Paris", "country": "France"},
+    {"city": "London", "country": "UK"},
 ]
 
 
@@ -49,6 +54,30 @@ def get_db_conn():
         password=os.getenv("PGPASSWORD", ""),
         dbname=os.getenv("PGDATABASE", "weather_data"),
     )
+
+
+def get_coordinates(city, country):
+    """
+    Retrieve latitude and longitude for a city using Nominatim geocoding.
+    
+    Args:
+        city: City name (e.g., "Paris")
+        country: Country name (e.g., "France")
+    
+    Returns:
+        Tuple of (latitude, longitude) or None if geocoding fails
+    """
+    try:
+        geolocator = Nominatim(user_agent="weather_app")
+        location = geolocator.geocode(f"{city}, {country}")
+        if location:
+            return (location.latitude, location.longitude)
+        else:
+            log.warning("Could not geocode: %s, %s", city, country)
+            return None
+    except (GeocoderTimedOut, GeocoderServiceError) as e:
+        log.error("Geocoding service error for %s, %s: %s", city, country, e)
+        return None
 
 
 def ensure_cities_table_exists(conn):
@@ -72,11 +101,11 @@ def city_exists(conn, name):
         return cur.fetchone() is not None
 
 
-def insert_city(conn, city):
+def insert_city(conn, city_name, latitude, longitude):
     with conn.cursor() as cur:
         cur.execute(
             "INSERT INTO cities (name, latitude, longitude) VALUES (%s, %s, %s) RETURNING id",
-            (city["name"], city["latitude"], city["longitude"]),
+            (city_name, latitude, longitude),
         )
         new_id = cur.fetchone()[0]
     conn.commit()
@@ -87,13 +116,25 @@ def main():
     conn = get_db_conn()
     try:
         ensure_cities_table_exists(conn)
-        for c in CITIES:
-            name = c["name"]
-            if city_exists(conn, name):
-                log.info("City already exists, skipping: %s", name)
+        for city_info in CITIES:
+            city = city_info["city"]
+            country = city_info["country"]
+            full_name = f"{city}, {country}"
+            
+            if city_exists(conn, full_name):
+                log.info("City already exists, skipping: %s", full_name)
                 continue
-            new_id = insert_city(conn, c)
-            log.info("Inserted city %s with id=%s", name, new_id)
+            
+            # Retrieve coordinates
+            coords = get_coordinates(city, country)
+            if coords is None:
+                log.error("Skipping %s - could not retrieve coordinates", full_name)
+                continue
+            
+            latitude, longitude = coords
+            new_id = insert_city(conn, full_name, latitude, longitude)
+            log.info("Inserted city %s (lat=%s, lon=%s) with id=%s", 
+                     full_name, latitude, longitude, new_id)
     except Exception:
         log.exception("Error while populating cities")
     finally:
