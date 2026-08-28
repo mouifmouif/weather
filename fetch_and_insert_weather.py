@@ -22,6 +22,8 @@ import json
 import pandas as pd
 
 # Config
+# Load environment variables from .env
+load_dotenv()
 DATABASE_URL = os.getenv("DATABASE_URL")  # e.g. "postgres://user:pass@host:port/dbname"
 START_DATE = "1970-01-01"
 END_DATE = os.getenv("END_DATE", "2026-08-27")
@@ -187,8 +189,6 @@ def upsert_daily_weather(conn, city_id, parsed_rows):
 def main():
     client = build_openmeteo_client()
     conn = get_db_conn()
-    # Load environment variables from .env
-    load_dotenv()
 
     try:
         ensure_table(conn)
