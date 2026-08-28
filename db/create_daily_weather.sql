@@ -18,10 +18,6 @@ CREATE TABLE IF NOT EXISTS daily_weather (
     rain_sum DECIMAL(7,2),
     snowfall_sum DECIMAL(7,2),
 
-    -- apparent temperatures (°C)
-    apparent_temperature_max DECIMAL(5,2),
-    apparent_temperature_min DECIMAL(5,2),
-
     -- sunshine duration in minutes
     sunshine_duration_minutes INTEGER,
 
