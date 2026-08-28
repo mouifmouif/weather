@@ -11,7 +11,7 @@ Usage:
 import os
 import sys
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 import psycopg2
 import psycopg2.extras
 from dotenv import load_dotenv
@@ -74,6 +74,20 @@ def ensure_table(conn):
             raise RuntimeError("daily_weather table does not exist. Please create it first.")
     conn.commit()
 
+def get_latest_date_for_city(conn, city_id):
+    """
+    Get the most recent date we have data for this city.
+    Returns the date as a string (YYYY-MM-DD), or None if no data exists.
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT MAX(day) FROM daily_weather WHERE city_id = %s;",
+            (city_id,)
+        )
+        result = cur.fetchone()
+        latest_date = result[0] if result and result[0] else None
+    return latest_date
+
 def fetch_for_city(client, lat, lon, start_date, end_date):
     params = {
         "latitude": float(lat),
@@ -128,7 +142,7 @@ def parse_daily_entries(response):
             "daily_min": float(daily_temperature_2m_min[i]) if i < len(daily_temperature_2m_min) else None,
             "apparent_temperature_max": float(daily_apparent_temperature_max[i]) if i < len(daily_apparent_temperature_max) else None,
             "apparent_temperature_min": float(daily_apparent_temperature_min[i]) if i < len(daily_apparent_temperature_min) else None,
-            "sunshine_duration_minutes": float(daily_sunshine_duration[i]) / 60 if i < len(daily_sunshine_duration) else None,
+            "sunshine_duration_minutes": int(float(daily_sunshine_duration[i])) if i < len(daily_sunshine_duration) else None,
             "rain_sum": float(daily_rain_sum[i]) if i < len(daily_rain_sum) else None,
             "snowfall_sum": float(daily_snowfall_sum[i]) if i < len(daily_snowfall_sum) else None,
         }
@@ -191,9 +205,32 @@ def main():
             name = c["name"]
             lat = c["latitude"]
             lon = c["longitude"]
-            log.info("Fetching %s (id=%s) lat=%s lon=%s", name, city_id, lat, lon)
+            
+            # Determine the date range to fetch
+            latest_date = get_latest_date_for_city(conn, city_id)
+            
+            if latest_date:
+                # We have data; fetch from day after latest to END_DATE
+                latest = datetime.strptime(latest_date, "%Y-%m-%d")
+                next_date = (latest + timedelta(days=1)).strftime("%Y-%m-%d")
+                fetch_start = next_date
+                fetch_end = END_DATE
+                log.info("City %s (id=%s) has data up to %s. Fetching from %s to %s", 
+                         name, city_id, latest_date, fetch_start, fetch_end)
+            else:
+                # No data; fetch from START_DATE to END_DATE
+                fetch_start = START_DATE
+                fetch_end = END_DATE
+                log.info("City %s (id=%s) has no data. Fetching from %s to %s", 
+                         name, city_id, fetch_start, fetch_end)
+            
+            # Only fetch if there's a date range to cover
+            if fetch_start > fetch_end:
+                log.info("City %s (id=%s) is already up to date.", name, city_id)
+                continue
+            
             try:
-                response = fetch_for_city(client, lat, lon, START_DATE, END_DATE)
+                response = fetch_for_city(client, lat, lon, fetch_start, fetch_end)
                 parsed = parse_daily_entries(response)
                 n = upsert_daily_weather(conn, city_id, parsed)
                 log.info("Inserted/updated %d rows for city %s", n, name)
