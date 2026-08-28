@@ -135,7 +135,7 @@ def parse_daily_entries(response):
             "day": date.strftime("%Y-%m-%d"),
             "daily_max": float(daily_temperature_2m_max[i]) if i < len(daily_temperature_2m_max) else None,
             "daily_min": float(daily_temperature_2m_min[i]) if i < len(daily_temperature_2m_min) else None,
-            "sunshine_duration_minutes": int(float(daily_sunshine_duration[i])) if i < len(daily_sunshine_duration) else None,
+            "sunshine_duration_minutes": int(float(daily_sunshine_duration[i]) / 60) if i < len(daily_sunshine_duration) else None,
             "rain_sum": float(daily_rain_sum[i]) if i < len(daily_rain_sum) else None,
             "snowfall_sum": float(daily_snowfall_sum[i]) if i < len(daily_snowfall_sum) else None,
         }
