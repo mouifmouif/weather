@@ -230,8 +230,10 @@ def main():
                 log.info("City %s (id=%s) has no data. Fetching from %s to %s", 
                          name, city_id, fetch_start, fetch_end)
             
-            # Only fetch if there's a date range to cover
-            if fetch_start > fetch_end:
+            # Only fetch if there's a date range to cover (use datetime comparison)
+            fetch_start_dt = datetime.strptime(fetch_start, "%Y-%m-%d")
+            fetch_end_dt = datetime.strptime(fetch_end, "%Y-%m-%d")
+            if fetch_start_dt > fetch_end_dt:
                 log.info("City %s (id=%s) is already up to date.", name, city_id)
                 continue
             
