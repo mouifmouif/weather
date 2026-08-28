@@ -23,7 +23,7 @@ import pandas as pd
 
 # Config
 DATABASE_URL = os.getenv("DATABASE_URL")  # e.g. "postgres://user:pass@host:port/dbname"
-START_DATE = os.getenv("START_DATE", "1970-01-01")
+START_DATE = "1970-01-01"
 END_DATE = os.getenv("END_DATE", "2026-08-27")
 OPENMETEO_URL = "https://archive-api.open-meteo.com/v1/archive"
 DAILY_VARS = [
