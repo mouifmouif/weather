@@ -210,13 +210,19 @@ def main():
             latest_date = get_latest_date_for_city(conn, city_id)
             
             if latest_date:
+                # Convert datetime.date to string if needed
+                if hasattr(latest_date, 'strftime'):
+                    latest_date_str = latest_date.strftime("%Y-%m-%d")
+                else:
+                    latest_date_str = str(latest_date)
+                
                 # We have data; fetch from day after latest to END_DATE
-                latest = datetime.strptime(latest_date, "%Y-%m-%d")
+                latest = datetime.strptime(latest_date_str, "%Y-%m-%d")
                 next_date = (latest + timedelta(days=1)).strftime("%Y-%m-%d")
                 fetch_start = next_date
                 fetch_end = END_DATE
                 log.info("City %s (id=%s) has data up to %s. Fetching from %s to %s", 
-                         name, city_id, latest_date, fetch_start, fetch_end)
+                         name, city_id, latest_date_str, fetch_start, fetch_end)
             else:
                 # No data; fetch from START_DATE to END_DATE
                 fetch_start = START_DATE
