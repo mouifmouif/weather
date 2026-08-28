@@ -21,9 +21,10 @@ import openmeteo_requests
 import json
 import pandas as pd
 
-# Config
-# Load environment variables from .env
+# Load environment variables from .env FIRST, before using them
 load_dotenv()
+
+# Config
 DATABASE_URL = os.getenv("DATABASE_URL")  # e.g. "postgres://user:pass@host:port/dbname"
 START_DATE = "1970-01-01"
 END_DATE = os.getenv("END_DATE", "2026-08-27")
@@ -31,8 +32,6 @@ OPENMETEO_URL = "https://archive-api.open-meteo.com/v1/archive"
 DAILY_VARS = [
     "temperature_2m_max",
     "temperature_2m_min",
-    "apparent_temperature_max",
-    "apparent_temperature_min",
     "sunshine_duration",
     "rain_sum",
     "snowfall_sum"
@@ -111,14 +110,12 @@ def parse_daily_entries(response):
     # Get daily data from response object
     daily = response.Daily()
     
-    # Extract time series (Variables are indexed in order: 0-6 match DAILY_VARS order)
+    # Extract time series (Variables are indexed in order: 0-4 match DAILY_VARS order)
     daily_temperature_2m_max = daily.Variables(0).ValuesAsNumpy()
     daily_temperature_2m_min = daily.Variables(1).ValuesAsNumpy()
-    daily_apparent_temperature_max = daily.Variables(2).ValuesAsNumpy()
-    daily_apparent_temperature_min = daily.Variables(3).ValuesAsNumpy()
-    daily_sunshine_duration = daily.Variables(4).ValuesAsNumpy()
-    daily_rain_sum = daily.Variables(5).ValuesAsNumpy()
-    daily_snowfall_sum = daily.Variables(6).ValuesAsNumpy()
+    daily_sunshine_duration = daily.Variables(2).ValuesAsNumpy()
+    daily_rain_sum = daily.Variables(3).ValuesAsNumpy()
+    daily_snowfall_sum = daily.Variables(4).ValuesAsNumpy()
     
     # Build date range
     dates = pd.date_range(
@@ -128,9 +125,8 @@ def parse_daily_entries(response):
         inclusive="left"
     )
     
-    log.info("Parsed - times: %d entries, tmax: %d, tmin: %d, apparent_tmax: %d, apparent_tmin: %d, sunshine: %d, rain: %d, snowfall: %d",
+    log.info("Parsed - times: %d entries, tmax: %d, tmin: %d, sunshine: %d, rain: %d, snowfall: %d",
              len(dates), len(daily_temperature_2m_max), len(daily_temperature_2m_min), 
-             len(daily_apparent_temperature_max), len(daily_apparent_temperature_min),
              len(daily_sunshine_duration), len(daily_rain_sum), len(daily_snowfall_sum))
     
     rows = []
@@ -139,8 +135,6 @@ def parse_daily_entries(response):
             "day": date.strftime("%Y-%m-%d"),
             "daily_max": float(daily_temperature_2m_max[i]) if i < len(daily_temperature_2m_max) else None,
             "daily_min": float(daily_temperature_2m_min[i]) if i < len(daily_temperature_2m_min) else None,
-            "apparent_temperature_max": float(daily_apparent_temperature_max[i]) if i < len(daily_apparent_temperature_max) else None,
-            "apparent_temperature_min": float(daily_apparent_temperature_min[i]) if i < len(daily_apparent_temperature_min) else None,
             "sunshine_duration_minutes": int(float(daily_sunshine_duration[i])) if i < len(daily_sunshine_duration) else None,
             "rain_sum": float(daily_rain_sum[i]) if i < len(daily_rain_sum) else None,
             "snowfall_sum": float(daily_snowfall_sum[i]) if i < len(daily_snowfall_sum) else None,
@@ -152,13 +146,11 @@ def upsert_daily_weather(conn, city_id, parsed_rows):
     if not parsed_rows:
         return 0
     sql = """
-    INSERT INTO daily_weather (city_id, day, daily_max, daily_min, apparent_temperature_max, apparent_temperature_min, sunshine_duration_minutes, rain_sum, snowfall_sum)
-    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+    INSERT INTO daily_weather (city_id, day, daily_max, daily_min, sunshine_duration_minutes, rain_sum, snowfall_sum)
+    VALUES (%s, %s, %s, %s, %s, %s, %s)
     ON CONFLICT (city_id, day) DO UPDATE
       SET daily_max = EXCLUDED.daily_max,
           daily_min = EXCLUDED.daily_min,
-          apparent_temperature_max = EXCLUDED.apparent_temperature_max,
-          apparent_temperature_min = EXCLUDED.apparent_temperature_min,
           sunshine_duration_minutes = EXCLUDED.sunshine_duration_minutes,
           rain_sum = EXCLUDED.rain_sum,
           snowfall_sum = EXCLUDED.snowfall_sum,
@@ -171,8 +163,6 @@ def upsert_daily_weather(conn, city_id, parsed_rows):
             r["day"],
             r["daily_max"],
             r["daily_min"],
-            r["apparent_temperature_max"],
-            r["apparent_temperature_min"],
             r["sunshine_duration_minutes"],
             r["rain_sum"],
             r["snowfall_sum"]
@@ -189,7 +179,6 @@ def upsert_daily_weather(conn, city_id, parsed_rows):
 def main():
     client = build_openmeteo_client()
     conn = get_db_conn()
-
     try:
         ensure_table(conn)
         with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
