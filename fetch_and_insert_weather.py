@@ -41,9 +41,6 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 log = logging.getLogger(__name__)
 
 def get_db_conn():
-    # Load environment variables from .env
-    load_dotenv()
-  
     database_url = os.getenv("DATABASE_URL")
     if database_url:
         return psycopg2.connect(database_url)
@@ -190,6 +187,9 @@ def upsert_daily_weather(conn, city_id, parsed_rows):
 def main():
     client = build_openmeteo_client()
     conn = get_db_conn()
+    # Load environment variables from .env
+    load_dotenv()
+
     try:
         ensure_table(conn)
         with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
